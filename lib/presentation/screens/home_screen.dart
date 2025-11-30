@@ -1,22 +1,208 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 import '../../application/notifiers/expense_notifier.dart';
 import '../../domain/entities/expense.dart';
 import '../../core/utils/uuid_generator.dart';
 import '../../application/providers/account_repository_provider.dart';
+import '../../core/services/permission_service.dart';
+import '../../core/services/sms_service.dart';
+import '../widgets/permission_explanation_dialog.dart';
 
 /// Home screen displaying expenses
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _hasCheckedPermission = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Check permission after the first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checkPermission();
+      // Initialize SMS service with expense notifier for auto-processing
+      _initializeSmsService();
+    });
+  }
+
+  void _initializeSmsService() {
+    // Initialize SMS service with the expense notifier
+    // This allows automatic expense creation from incoming SMS
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final notifier = ref.read(expenseNotifierProvider.notifier);
+      SmsService.initialize(expenseNotifier: notifier);
+    });
+  }
+
+  Future<void> _checkPermission() async {
+    if (_hasCheckedPermission) return;
+    _hasCheckedPermission = true;
+
+    try {
+      // Check if permission is already granted
+      final isGranted = await PermissionService.isPermissionGranted();
+      
+      if (isGranted) {
+        return; // Permission already granted, no need to show dialog
+      }
+
+      // Check if we've asked before
+      final hasAsked = await PermissionService.hasAskedPermission();
+      
+      if (!hasAsked && mounted) {
+        // Show explanation dialog
+        _showPermissionDialog();
+      }
+    } catch (e) {
+      // If there's an error, just continue
+    }
+  }
+
+  void _showPermissionDialog() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PermissionExplanationDialog(
+        onGrantPermission: () {
+          Navigator.of(dialogContext).pop();
+          _requestPermission();
+        },
+        onSkip: () {
+          Navigator.of(dialogContext).pop();
+        },
+      ),
+    );
+  }
+
+  Future<void> _requestPermission() async {
+    try {
+      final granted = await PermissionService.requestPermission();
+      
+      if (!granted && mounted) {
+        // Check if permission is permanently denied
+        try {
+          final status = await ph.Permission.sms.status;
+          if (status.isPermanentlyDenied && mounted) {
+            _showSettingsDialog();
+          }
+        } catch (e) {
+          // If we can't check status, just continue
+        }
+      }
+    } catch (e) {
+      // Handle error
+    }
+  }
+
+  void _showSettingsDialog() {
+    if (!mounted) return;
+    
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Permission Required'),
+        content: const Text(
+          'SMS permission is required for automatic expense detection. '
+          'Please enable it in app settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(dialogContext).pop();
+              await PermissionService.openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _scanSmsForExpenses() async {
+    // Check permission first
+    final hasPermission = await PermissionService.isPermissionGranted();
+    if (!hasPermission) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('SMS permission is required to scan messages'),
+          ),
+        );
+      }
+      return;
+    }
+
+    // Show loading
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Scanning SMS messages...'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+
+    try {
+      final smsService = SmsService();
+      final expenseNotifier = ref.read(expenseNotifierProvider.notifier);
+      
+      final count = await smsService.processRecentSmsAndCreateExpenses(
+        expenseNotifier: expenseNotifier,
+        limit: 50,
+        daysBack: 7,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              count > 0
+                  ? 'Found and added $count expense(s) from SMS'
+                  : 'No expenses found in recent SMS messages',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error scanning SMS: ${e.toString()}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final expenseState = ref.watch(expenseNotifierProvider);
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Expense Manager'),
         elevation: 2,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.sync),
+            tooltip: 'Scan SMS for expenses',
+            onPressed: () => _scanSmsForExpenses(),
+          ),
+        ],
       ),
       body: expenseState.isLoading
           ? const Center(child: CircularProgressIndicator())
