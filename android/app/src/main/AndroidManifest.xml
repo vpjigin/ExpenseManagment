@@ -4,6 +4,10 @@
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.SEND_SMS" />
     
+    <!-- Permissions for showing popup when app is closed -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    
     <application
         android:label="expense_managment"
         android:name="${applicationName}"
@@ -40,8 +44,9 @@
         <receiver
             android:name=".SmsReceiver"
             android:exported="true"
-            android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter>
+            android:permission="android.permission.BROADCAST_SMS"
+            android:enabled="true">
+            <intent-filter android:priority="1000">
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
@@ -54,6 +59,8 @@
             android:theme="@style/LaunchTheme"
             android:taskAffinity=""
             android:excludeFromRecents="true"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
