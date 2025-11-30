@@ -1,25 +1,48 @@
 package com.solocrew.expense_managment
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Telephony
 import android.telephony.SmsMessage
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import java.util.regex.Pattern
 
 class SmsReceiver : BroadcastReceiver() {
+    companion object {
+        private const val TAG = "ExpenseSMS"
+    }
+    
     override fun onReceive(context: Context, intent: Intent) {
+        Log.d(TAG, "BroadcastReceiver triggered with action: ${intent.action}")
+        
         if (Telephony.Sms.Intents.SMS_RECEIVED_ACTION == intent.action) {
+            Log.d(TAG, "SMS_RECEIVED_ACTION detected")
             val smsMessages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
+            Log.d(TAG, "Found ${smsMessages.size} SMS message(s)")
             
             for (smsMessage in smsMessages) {
                 val messageBody = smsMessage.messageBody
                 val sender = smsMessage.originatingAddress
                 val timestamp = smsMessage.timestampMillis
                 
-                Log.d("SmsReceiver", "SMS received from $sender: $messageBody")
+                // Log with "message" tag for easy filtering
+                val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                    .format(java.util.Date(timestamp))
+                Log.d("message", "[RECEIVED] From: $sender | Date: $dateStr")
+                Log.d("message", "[RECEIVED] Body: $messageBody")
+                Log.d("message", "[RECEIVED] ---")
+                
+                Log.d(TAG, "=== SMS DETAILS ===")
+                Log.d(TAG, "Sender: $sender")
+                Log.d(TAG, "Body: $messageBody")
+                Log.d(TAG, "Timestamp: $timestamp")
                 
                 // Extract amount from SMS
                 val extractedAmount = extractAmountFromSms(messageBody)
@@ -27,16 +50,25 @@ class SmsReceiver : BroadcastReceiver() {
                 // Check if it's an expense-related SMS
                 val isExpense = isExpenseSms(messageBody)
                 
-                Log.d("SmsReceiver", "Amount: $extractedAmount, IsExpense: $isExpense")
+                Log.d(TAG, "Extracted Amount: $extractedAmount")
+                Log.d(TAG, "Is Expense SMS: $isExpense")
                 
-                if (extractedAmount > 0 && isExpense) {
-                    // Launch overlay activity with extracted amount
-                    Log.d("SmsReceiver", "Launching QuickAddActivity with amount: $extractedAmount")
-                    launchQuickAddActivity(context, extractedAmount, messageBody)
+                // Show popup if amount is found (even without keywords, as amount detection is reliable)
+                // But still check keywords to avoid false positives
+                if (extractedAmount > 0) {
+                    if (isExpense || extractedAmount >= 1.0) { // Show if expense keyword found OR amount >= 1
+                        // Launch overlay activity with extracted amount
+                        Log.d(TAG, "✓ Conditions met! Launching QuickAddActivity with amount: $extractedAmount")
+                        launchQuickAddActivity(context, extractedAmount, messageBody)
+                    } else {
+                        Log.d(TAG, "✗ Skipping SMS - amount too small or no expense keywords: $extractedAmount")
+                    }
                 } else {
-                    Log.d("SmsReceiver", "Skipping SMS - amount: $extractedAmount, isExpense: $isExpense")
+                    Log.d(TAG, "✗ Skipping SMS - no amount found, isExpense: $isExpense")
                 }
             }
+        } else {
+            Log.d(TAG, "Unknown action: ${intent.action}")
         }
     }
     
@@ -56,11 +88,11 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 val amount = matcher1.group(1)?.toDouble() ?: 0.0
                 if (amount > 0) {
-                    Log.d("SmsReceiver", "Extracted amount: $amount from pattern1")
+                    Log.d(TAG, "Extracted amount: $amount from pattern1")
                     return amount
                 }
             } catch (e: Exception) {
-                Log.e("SmsReceiver", "Error parsing amount: ${e.message}")
+                Log.e(TAG, "Error parsing amount: ${e.message}")
             }
         }
         
@@ -74,11 +106,11 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 val amount = matcher2.group(1)?.toDouble() ?: 0.0
                 if (amount > 0) {
-                    Log.d("SmsReceiver", "Extracted amount: $amount from pattern2")
+                    Log.d(TAG, "Extracted amount: $amount from pattern2")
                     return amount
                 }
             } catch (e: Exception) {
-                Log.e("SmsReceiver", "Error parsing amount: ${e.message}")
+                Log.e(TAG, "Error parsing amount: ${e.message}")
             }
         }
         
@@ -92,15 +124,15 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 val amount = matcher3.group(1)?.toDouble() ?: 0.0
                 if (amount > 0) {
-                    Log.d("SmsReceiver", "Extracted amount: $amount from pattern3")
+                    Log.d(TAG, "Extracted amount: $amount from pattern3")
                     return amount
                 }
             } catch (e: Exception) {
-                Log.e("SmsReceiver", "Error parsing amount: ${e.message}")
+                Log.e(TAG, "Error parsing amount: ${e.message}")
             }
         }
         
-        Log.d("SmsReceiver", "No amount found in SMS: $body")
+        Log.d(TAG, "No amount found in SMS: $body")
         return 0.0
     }
     
@@ -111,14 +143,16 @@ class SmsReceiver : BroadcastReceiver() {
         val expenseKeywords = listOf(
             "debit", "debited", "spent", "paid", "purchase", 
             "withdrawal", "withdrawn", "deducted", "transaction",
-            "payment", "purchased", "charged"
+            "payment", "purchased", "charged", "sent", "transfer",
+            "credited", "credit", "withdraw", "cash", "upi", "neft",
+            "imps", "rtgs", "bank", "account", "a/c", "ac"
         )
         
         val isExpense = expenseKeywords.any { keyword ->
             bodyLower.contains(keyword)
         }
         
-        Log.d("SmsReceiver", "isExpenseSms check: $isExpense for message: $body")
+        Log.d(TAG, "isExpenseSms check: $isExpense for message: $body")
         return isExpense
     }
     
@@ -149,15 +183,84 @@ class SmsReceiver : BroadcastReceiver() {
                 putExtra("amount", amount)
                 putExtra("sms_body", smsBody)
             }
-            // This works even when app is closed or in background
-            context.startActivity(intent)
+            
+            // Try to launch activity directly (works for SMS_RECEIVED broadcasts)
+            try {
+                context.startActivity(intent)
+                Log.d(TAG, "Activity launched successfully")
+            } catch (e: SecurityException) {
+                // If direct launch fails, show notification instead
+                Log.w(TAG, "Direct activity launch failed, showing notification: ${e.message}")
+                showNotification(context, amount, smsBody)
+            } catch (e: Exception) {
+                // Other errors - show notification as fallback
+                Log.e(TAG, "Error launching activity: ${e.message}", e)
+                showNotification(context, amount, smsBody)
+            }
             
             // Release wake lock after activity starts
             wakeLock.release()
-            
-            Log.d("SmsReceiver", "Activity launched successfully")
         } catch (e: Exception) {
-            Log.e("SmsReceiver", "Error launching QuickAddActivity: ${e.message}", e)
+            Log.e(TAG, "Error in launchQuickAddActivity: ${e.message}", e)
+            // Fallback to notification
+            showNotification(context, amount, smsBody)
+        }
+    }
+    
+    private fun showNotification(
+        context: Context,
+        amount: Double,
+        smsBody: String?
+    ) {
+        try {
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            
+            // Create notification channel for Android 8.0+
+            val channelId = "expense_quick_add"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "Quick Add Expense",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifications for quick expense entry"
+                    enableVibration(true)
+                    enableLights(true)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+            
+            // Create intent for notification tap
+            val intent = Intent(context, QuickAddExpenseActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or 
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("amount", amount)
+                putExtra("sms_body", smsBody)
+            }
+            
+            val pendingIntent = PendingIntent.getActivity(
+                context,
+                0,
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            
+            val notification = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle("Expense Detected: ₹${String.format("%.2f", amount)}")
+                .setContentText("Tap to add expense")
+                .setStyle(NotificationCompat.BigTextStyle().bigText(smsBody ?: "Expense detected from SMS"))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+            
+            notificationManager.notify(System.currentTimeMillis().toInt(), notification)
+            Log.d(TAG, "Notification shown successfully")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error showing notification: ${e.message}", e)
         }
     }
 }

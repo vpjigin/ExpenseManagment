@@ -56,4 +56,29 @@ class PermissionService {
   static Future<bool> openAppSettings() async {
     return await ph.openAppSettings();
   }
+
+  /// Check if notification permission is granted (Android 13+)
+  static Future<bool> isNotificationPermissionGranted() async {
+    try {
+      if (await ph.Permission.notification.isDenied) {
+        return false;
+      }
+      final status = await ph.Permission.notification.status;
+      return status.isGranted;
+    } catch (e) {
+      // Notification permission not available on older Android versions
+      return true;
+    }
+  }
+
+  /// Request notification permission (Android 13+)
+  static Future<bool> requestNotificationPermission() async {
+    try {
+      final status = await ph.Permission.notification.request();
+      return status.isGranted;
+    } catch (e) {
+      // Notification permission not available on older Android versions
+      return true;
+    }
+  }
 }

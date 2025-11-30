@@ -39,6 +39,11 @@ android {
     }
 }
 
+dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.core:core:1.12.0")
+}
+
 flutter {
     source = "../.."
 }

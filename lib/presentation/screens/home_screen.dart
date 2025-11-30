@@ -96,6 +96,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         } catch (e) {
           // If we can't check status, just continue
         }
+      } else if (granted && mounted) {
+        // SMS permission granted, now request notification permission (Android 13+)
+        final notificationGranted = await PermissionService.isNotificationPermissionGranted();
+        if (!notificationGranted) {
+          await PermissionService.requestNotificationPermission();
+        }
       }
     } catch (e) {
       // Handle error
@@ -143,6 +149,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
       return;
     }
+
+    // Log all SMS messages to logcat
+    await SmsService.logAllSms();
 
     // Show loading
     if (mounted) {

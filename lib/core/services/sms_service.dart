@@ -9,6 +9,15 @@ class SmsService {
   static const MethodChannel _channel = MethodChannel('sms_receiver');
   static ExpenseNotifier? _expenseNotifier;
 
+  /// Log all SMS messages to logcat with tag "message"
+  static Future<void> logAllSms() async {
+    try {
+      await _channel.invokeMethod('logAllSms');
+    } catch (e) {
+      // Ignore errors silently
+    }
+  }
+
   /// Read recent SMS messages and extract expenses
   Future<List<Expense>> readRecentSmsForExpenses({
     int limit = 50,
